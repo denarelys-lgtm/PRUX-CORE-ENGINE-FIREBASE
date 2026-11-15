@@ -35,6 +35,10 @@ android {
                     'org/bouncycastle/pkcs/PKCS12Messages*.properties'
             ]
         }
+        jniLibs {
+            // Evita que Gradle comprima las librerías .so (vital para ejecutar binarios)
+            useLegacyPackaging = true 
+        }
     }
 }
 
