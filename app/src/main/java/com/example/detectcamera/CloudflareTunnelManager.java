@@ -30,20 +30,19 @@ public class CloudflareTunnelManager {
 
         new Thread(() -> {
             try {
-                // EL TRUCO: El binario ahora se lee desde la carpeta de librerías nativas,
-                // donde Android SÍ permite ejecución (esquivando el bloqueo W^X).
+                // LA MAGIA ESTÁ AQUÍ: Leemos el binario desde la carpeta nativa de Android
                 File tunnelBin = new File(appContext.getApplicationInfo().nativeLibraryDir, "libcloudflared.so");
 
                 if (!tunnelBin.exists()) {
-                    Log.e(TAG, "El binario libcloudflared.so no existe en la ruta nativa.");
+                    Log.e(TAG, "ERROR FATAL: El binario libcloudflared.so no existe en la ruta nativa.");
                     return;
                 }
 
                 Log.i(TAG, "Ejecutando binario desde: " + tunnelBin.getAbsolutePath());
 
-                String binPath = tunnelBin.getAbsolutePath();
+                // Ejecutamos el túnel apuntando al puerto 8080
                 ProcessBuilder pb = new ProcessBuilder(
-                        binPath, "tunnel", "--url", "http://localhost:8080");
+                        tunnelBin.getAbsolutePath(), "tunnel", "--url", "http://localhost:8080");
                 pb.redirectErrorStream(true);
 
                 tunnelProcess = pb.start();
@@ -57,7 +56,6 @@ public class CloudflareTunnelManager {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         Log.d(TAG, line);
-                        // Extracción robusta + dedupe para no re-reportar la misma URL.
                         String url = extraerUrlDeLinea(line);
                         if (url != null && !url.equals(ultimaReportada)) {
                             ultimaReportada = url;
@@ -72,7 +70,7 @@ public class CloudflareTunnelManager {
                 tunnelProcess = null;
 
             } catch (Exception e) {
-                Log.e(TAG, "Error en el túnel de Cloudflare", e);
+                Log.e(TAG, "Error crítico en el túnel de Cloudflare", e);
                 if (tunnelProcess != null) {
                     try { tunnelProcess.destroyForcibly(); } catch (Exception ignored) {}
                     tunnelProcess = null;
