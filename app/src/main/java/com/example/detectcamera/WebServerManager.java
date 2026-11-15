@@ -21,7 +21,7 @@ public final class WebServerManager {
         if (server == null) {
             server = new WebServer(PORT);
             server.start(10000, false);
-            Log.i(TAG, "WebServer iniciado en puerto " + PORT);
+            Log.i(TAG, "WebServer iniciado en puerto " + getPuertoInterno());
         }
         return server;
     }
@@ -56,5 +56,26 @@ public final class WebServerManager {
             }
             server = null;
         }
+    }
+
+    /**
+     * Puerto en el que el servidor está escuchando realmente.
+     * Si el servidor aún no está creado, devuelve el puerto configurado por defecto.
+     */
+    public static synchronized int getPuerto() {
+        return getPuertoInterno();
+    }
+
+    private static int getPuertoInterno() {
+        if (server != null) {
+            try {
+                // Si WebServer expone el puerto real, úsalo.
+                int real = server.getListeningPort();
+                if (real > 0) return real;
+            } catch (Throwable ignored) {
+                // Si WebServer no tiene el método, caemos al PORT configurado.
+            }
+        }
+        return PORT;
     }
 }
