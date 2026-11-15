@@ -16,9 +16,12 @@ public class CloudflareTunnelManager {
     private static final String TAG = "PruxCloudflare";
     private static Process tunnelProcess = null;
 
-    /** Regex acotada a URLs reales de túneles rápidos de Cloudflare. */
+    /** 
+     * Regex acotada a URLs reales de túneles rápidos.
+     * El (?!api\\.) evita que capture la URL de la API si cloudflared imprime un error.
+     */
     private static final Pattern URL_TUNEL = Pattern.compile(
-            "https://[a-z0-9-]+\\.trycloudflare\\.com\\b");
+            "https://(?!api\\.)[a-z0-9-]+\\.trycloudflare\\.com\\b");
 
     public static synchronized void iniciarTunel(Context context) {
         if (tunnelProcess != null) {
@@ -30,7 +33,7 @@ public class CloudflareTunnelManager {
 
         new Thread(() -> {
             try {
-                // LA MAGIA ESTÁ AQUÍ: Leemos el binario desde la carpeta nativa de Android
+                // Leemos el binario desde la carpeta nativa de Android
                 File tunnelBin = new File(appContext.getApplicationInfo().nativeLibraryDir, "libcloudflared.so");
 
                 if (!tunnelBin.exists()) {
@@ -44,6 +47,10 @@ public class CloudflareTunnelManager {
                 ProcessBuilder pb = new ProcessBuilder(
                         tunnelBin.getAbsolutePath(), "tunnel", "--url", "http://localhost:8080");
                 pb.redirectErrorStream(true);
+
+                // SOLUCIÓN AL ERROR DE RED: Forzamos a Cloudflare a usar el DNS de Google (8.8.8.8)
+                // Esto evita el "connection refused" en el puerto 53 de Android.
+                pb.environment().put("TUNNEL_DNS", "8.8.8.8:53");
 
                 tunnelProcess = pb.start();
                 Log.i(TAG, "🚀 Túnel de Cloudflare iniciado en segundo plano");
