@@ -3,14 +3,13 @@ package com.example.detectcamera;
 import android.content.Context;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 public class CloudflareTunnelManager {
 
@@ -31,19 +30,16 @@ public class CloudflareTunnelManager {
 
         new Thread(() -> {
             try {
-                File binDir = appContext.getFilesDir();
-                File tunnelBin = new File(binDir, "cloudflared");
+                // EL TRUCO: El binario ahora se lee desde la carpeta de librerías nativas,
+                // donde Android SÍ permite ejecución (esquivando el bloqueo W^X).
+                File tunnelBin = new File(appContext.getApplicationInfo().nativeLibraryDir, "libcloudflared.so");
 
-                // Punto 4: si no existe, está corrupto o el asset cambió, se (re)extrae.
-                if (!binarioValido(tunnelBin, appContext)) {
-                    Log.i(TAG, "Extrayendo/reemplazando cloudflared desde assets (ZIP)...");
-                    extraerBinario(appContext, tunnelBin);
-                }
-
-                if (!tunnelBin.canExecute() && !tunnelBin.setExecutable(true)) {
-                    Log.e(TAG, "El binario no es ejecutable: " + tunnelBin.getAbsolutePath());
+                if (!tunnelBin.exists()) {
+                    Log.e(TAG, "El binario libcloudflared.so no existe en la ruta nativa.");
                     return;
                 }
+
+                Log.i(TAG, "Ejecutando binario desde: " + tunnelBin.getAbsolutePath());
 
                 String binPath = tunnelBin.getAbsolutePath();
                 ProcessBuilder pb = new ProcessBuilder(
@@ -56,13 +52,12 @@ public class CloudflareTunnelManager {
                 String ultimaReportada = null;
 
                 try (InputStream processInput = tunnelProcess.getInputStream();
-                     java.io.BufferedReader reader =
-                             new java.io.BufferedReader(new java.io.InputStreamReader(processInput))) {
+                     BufferedReader reader = new BufferedReader(new InputStreamReader(processInput))) {
 
                     String line;
                     while ((line = reader.readLine()) != null) {
                         Log.d(TAG, line);
-                        // Punto 9: extracción robusta + dedupe para no re-reportar la misma URL.
+                        // Extracción robusta + dedupe para no re-reportar la misma URL.
                         String url = extraerUrlDeLinea(line);
                         if (url != null && !url.equals(ultimaReportada)) {
                             ultimaReportada = url;
@@ -84,83 +79,6 @@ public class CloudflareTunnelManager {
                 }
             }
         }, "Prux-Tunnel-Thread").start();
-    }
-
-    /**
-     * Comprueba que el binario exista, tenga tamaño coherente con el asset,
-     * y sea ejecutable. Si algo falla, se fuerza re-extracción.
-     */
-    private static boolean binarioValido(File tunnelBin, Context context) {
-        if (!tunnelBin.exists() || tunnelBin.length() == 0) return false;
-
-        long tamanoEsperado = obtenerTamanoAssetSinComprimir(context, "cloudflared.zip");
-        if (tamanoEsperado > 0 && tunnelBin.length() != tamanoEsperado) {
-            Log.w(TAG, "Tamaño del binario no coincide (" + tunnelBin.length()
-                    + " vs " + tamanoEsperado + "). Se re-extraerá.");
-            return false;
-        }
-        return tunnelBin.canExecute() || tunnelBin.setExecutable(true);
-    }
-
-    /** Lee el tamaño del entry 'cloudflared' dentro del ZIP de assets sin extraerlo. */
-    private static long obtenerTamanoAssetSinComprimir(Context context, String assetZip) {
-        try (InputStream is = context.getAssets().open(assetZip);
-             ZipInputStream zis = new ZipInputStream(is)) {
-            ZipEntry e;
-            while ((e = zis.getNextEntry()) != null) {
-                if (esEntryCloudflared(e.getName())) {
-                    return e.getSize();
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "No se pudo leer el tamaño del asset", e);
-        }
-        return -1;
-    }
-
-    /** Extrae el binario a un archivo temporal y lo mueve atómicamente a destino. */
-    private static void extraerBinario(Context context, File destino) throws Exception {
-        File tmp = new File(destino.getParentFile(), "cloudflared.tmp");
-        boolean encontrado = false;
-
-        try (InputStream assetStream = context.getAssets().open("cloudflared.zip");
-             ZipInputStream zis = new ZipInputStream(assetStream)) {
-
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                if (esEntryCloudflared(entry.getName())) {
-                    try (FileOutputStream fos = new FileOutputStream(tmp)) {
-                        byte[] buffer = new byte[8 * 1024];
-                        int len;
-                        while ((len = zis.read(buffer)) > 0) {
-                            fos.write(buffer, 0, len);
-                        }
-                        fos.getFD().sync();
-                    }
-                    encontrado = true;
-                    break;
-                }
-                zis.closeEntry();
-            }
-        }
-
-        if (!encontrado) {
-            throw new IllegalStateException("cloudflared no encontrado dentro del ZIP");
-        }
-
-        if (destino.exists() && !destino.delete()) {
-            Log.w(TAG, "No se pudo borrar el binario anterior, se intentará sobrescribir");
-        }
-        if (!tmp.renameTo(destino)) {
-            throw new IllegalStateException("No se pudo mover cloudflared.tmp a cloudflared");
-        }
-        if (!destino.setExecutable(true)) {
-            Log.w(TAG, "setExecutable devolvió false en " + destino.getAbsolutePath());
-        }
-    }
-
-    private static boolean esEntryCloudflared(String nombre) {
-        return "cloudflared".equals(nombre) || nombre.endsWith("/cloudflared");
     }
 
     private static String extraerUrlDeLinea(String linea) {
